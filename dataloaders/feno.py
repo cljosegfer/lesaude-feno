@@ -6,6 +6,7 @@ import torch
 
 from tqdm import tqdm
 from torch.utils.data import Dataset
+from sklearn.preprocessing import StandardScaler
 
 class CODE():
     def __init__(self, hdf5_path = '/home/josegfer/code/code14/code14.h5', 
@@ -19,6 +20,7 @@ class CODE():
 
         trn_metadata, val_metadata, tst_metadata = self.split()
         self.check_dataleakage(trn_metadata, val_metadata, tst_metadata)
+        self.age_norm(trn_metadata)
         
         self.trn_idx_dict = self.get_idx_dict(trn_metadata)
         self.val_idx_dict = self.get_idx_dict(val_metadata)
@@ -59,20 +61,28 @@ class CODE():
                 assert self.hdf5_file[exam_id_col][split_idx_dict['h5_idx'][idx]] == exam_id
                 assert self.metadata[exam_id_col][split_idx_dict['csv_idx'][idx]] == exam_id
         return split_idx_dict
+    
+    def age_norm(self, trn_metadata):
+        scaler = StandardScaler();
+        scaler.fit(trn_metadata['age'].values.reshape(-1, 1));
+        self.metadata['age'] = scaler.transform(self.metadata['age'].values.reshape(-1, 1))
 
 class CODEsplit(Dataset):
     def __init__(self, database, split_idx_dict, 
-                 tracing_col = 'tracings', exam_id_col = 'exam_id', output_col = ["1dAVb", "RBBB", "LBBB", "SB", "AF", "ST"]):
+                 tracing_col = 'tracings', exam_id_col = 'exam_id', output_col = ["1dAVb", "RBBB", "LBBB", "SB", "AF", "ST"], feno_col = ['age', 'is_male']):
         self.database = database
         self.split_idx_dict = split_idx_dict
 
         self.tracing_col = tracing_col
         self.exam_id_col = exam_id_col
         self.output_col = output_col
+        self.feno_col = feno_col
     
     def __len__(self):
         return len(self.split_idx_dict[self.exam_id_col])
     
     def __getitem__(self, idx):
         return {'X': self.database.hdf5_file[self.tracing_col][self.split_idx_dict['h5_idx'][idx]], 
-                'y': self.database.metadata[self.output_col].loc[self.split_idx_dict['csv_idx'][idx]].values}
+                'y': self.database.metadata[self.output_col].loc[self.split_idx_dict['csv_idx'][idx]].values, 
+                'age': self.database.metadata[self.feno_col[0]].loc[self.split_idx_dict['csv_idx'][idx]], 
+                'is_male': self.database.metadata[self.feno_col[1]].loc[self.split_idx_dict['csv_idx'][idx]]}

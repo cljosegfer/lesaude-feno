@@ -1,16 +1,19 @@
 
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
 import os
 import numpy as np
 
 from tqdm import tqdm
 
-from dataloaders.baseline import CODEsplit
+from dataloaders.feno import CODEsplit
 from utils import plot_log, export, get_inputs, find_best_thresholds, metrics_table, json_dump
 
 BATCH_SIZE = 128
 NUM_WORKERS = 6
+
+def pretrain_loss(output, age, ismale):
+    return F.mse_loss(output[:, 0], age) + F.binary_cross_entropy_with_logits(output[:, 1], ismale)
 
 class Runner():
     def __init__(self, device, model, database, model_label = 'baseline'):
@@ -27,16 +30,15 @@ class Runner():
     
     def train(self, epochs):
         self.model = self.model.to(self.device)
-        criterion = nn.BCEWithLogitsLoss()
+        criterion = pretrain_loss
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=3e-4)
 
         trn_dl = torch.utils.data.DataLoader(self.trn_ds, batch_size = BATCH_SIZE, 
                                              shuffle = True, num_workers = NUM_WORKERS)
         val_dl = torch.utils.data.DataLoader(self.val_ds, batch_size = BATCH_SIZE, 
                                              shuffle = False, num_workers = NUM_WORKERS)
-
+        
         for epoch in range(epochs):
-            # trn_dl, val_dl = self.dataloader.get_train_dataloader(), self.dataloader.get_val_dataloader()
             trn_log = self._train_loop(trn_dl, optimizer, criterion)
             val_log = self._eval_loop(val_dl, criterion)
             plot_log(self.model_label, trn_log, val_log, epoch)
@@ -47,14 +49,13 @@ class Runner():
         log = []
         self.model.train()
         for batch in tqdm(loader):
-            # raw, exam_id, label = batch
             raw = batch['X']
-            label = batch['y']
             ecg = get_inputs(raw, device = self.device)
-            label = label.to(self.device).float()
+            age = batch['age'].to(self.device).float()
+            ismale = batch['is_male'].to(self.device).float()
 
-            logits = self.model.forward(ecg)
-            loss = criterion(logits, label)
+            output = self.model.forward(ecg)
+            loss = criterion(output, age, ismale)
 
             optimizer.zero_grad()
             loss.backward()
@@ -69,14 +70,13 @@ class Runner():
         self.model.eval()
         with torch.no_grad():
             for batch in tqdm(loader):
-                # raw, exam_id, label = batch
                 raw = batch['X']
-                label = batch['y']
                 ecg = get_inputs(raw, device = self.device)
-                label = label.to(self.device).float()
+                age = batch['age'].to(self.device).float()
+                ismale = batch['is_male'].to(self.device).float()
 
-                logits = self.model.forward(ecg)
-                loss = criterion(logits, label)
+                output = self.model.forward(ecg)
+                loss = criterion(output, age, ismale)
 
                 log += loss.item()
         return log / len(loader)

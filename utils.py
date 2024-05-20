@@ -5,6 +5,7 @@ import torch
 import json
 
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from collections import OrderedDict
 
 SIGNAL_CROP_LEN = 2560
 SIGNAL_NON_ZERO_START = 571
@@ -115,3 +116,22 @@ def metrics_table(all_binary_results, all_true_labels):
 def json_dump(metrics_dict, model_label):
     with open('output/{}/metrics.json'.format(model_label), 'w') as f:
         json.dump(metrics_dict, f)
+
+def load_backbone(model, backbone_path):
+    backbone = torch.load(backbone_path)
+    backbone = torch.nn.ModuleList(backbone.children())[:-1]
+
+    key_transformation = []
+    for key in model.state_dict().keys():
+        key_transformation.append(key)
+
+    state_dict = backbone.state_dict()
+    new_state_dict = OrderedDict()
+    for i, (key, value) in enumerate(state_dict.items()):
+        new_key = key_transformation[i]
+        new_state_dict[new_key] = value
+
+    log = model.load_state_dict(new_state_dict, strict = False)
+    assert log.missing_keys == ['linear.weight', 'linear.bias']
+    
+    return {'model': model, 'log': log}
